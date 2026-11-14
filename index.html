@@ -1,31 +1,298 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <title>나의 첫 바이브 코딩</title>
-    <style>
-        body { 
-            display: flex; flex-direction: column; align-items: center; justify-content: center; 
-            height: 100vh; margin: 0; transition: background-color 0.5s ease; font-family: sans-serif;
-        }
-        button { 
-            padding: 15px 30px; font-size: 20px; font-weight: bold;
-            border: none; border-radius: 10px; cursor: pointer;
-            background-color: #007ACC; color: white;
-        }
-        button:hover { background-color: #005A9E; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RISC Pipeline Execution Visualizer — Chapter 6 Pipelining</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-    <h1>VS Code 실습 완료 🚀</h1>
-    <button onclick="changeColor()">배경색 바꾸기</button>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-title-group">
+        <h1>
+          RISC 5-Stage Pipeline Simulator
+          <span class="header-badge">Chapter 6: Pipelining</span>
+        </h1>
+        <p>교과서(Hamacher Ch.6) 기반 파이프라인 실행 · Data Dependency · Memory Delay · Branch Delay 시각화 도구</p>
+      </div>
+      <div class="header-Architecture-pills">
+        <span class="stage-pill"><strong>F</strong> Fetch (B1)</span>
+        <span class="stage-pill"><strong>D</strong> Decode (B2)</span>
+        <span class="stage-pill"><strong>C</strong> Compute (B3: RZ)</span>
+        <span class="stage-pill"><strong>M</strong> Memory (B4: RY)</span>
+        <span class="stage-pill"><strong>W</strong> Write</span>
+      </div>
+    </div>
+  </header>
 
-    <script>
-        function changeColor() {
-            const colors = ['#FFDDC1', '#FFABAB', '#FFC3A0', '#D5AAFF', '#85E3FF', '#B9FFB0'];
-            const randomColor = colors[Math.floor(Math.random() * colors.length)];
-            document.body.style.backgroundColor = randomColor;
-        }
-    </script>
+  <main class="main-container">
+    <!-- Top Section: Code Input (Left) + Delay Mitigation Checkboxes (Right) -->
+    <section class="top-control-grid">
+      <!-- Left: RISC Code Input Card -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">1. RISC 어셈블리 코드 입력</h2>
+            <p class="card-subtitle">명령어를 입력하거나 교과서 예제 프리셋을 선택하면 아래 파이프라인 다이어그램이 실시간으로 갱신됩니다.</p>
+          </div>
+        </div>
+
+        <div class="preset-bar">
+          <span class="preset-label">교과서 예제:</span>
+          <button type="button" class="preset-btn active" data-preset="fig6_3">Fig 6.3/6.4: Data Dependency</button>
+          <button type="button" class="preset-btn" data-preset="fig6_15">Fig 6.15: RZ &amp; RY Forwarding</button>
+          <button type="button" class="preset-btn" data-preset="fig6_8">Fig 6.8: Load-Use Delay</button>
+          <button type="button" class="preset-btn" data-preset="fig6_7">Fig 6.7: Memory Cache Miss</button>
+          <button type="button" class="preset-btn" data-preset="fig6_9">Fig 6.9/6.10: Unconditional Branch</button>
+          <button type="button" class="preset-btn" data-preset="loop_branch">Sec 6.6.4: Loop &amp; Branch Prediction</button>
+          <button type="button" class="preset-btn" data-preset="prob6_12">Prob 6.12: 연속 레지스터 의존성</button>
+        </div>
+
+        <div class="editor-wrapper">
+          <textarea id="code-input" class="code-textarea" spellcheck="false">Add R2, R3, #100
+Subtract R9, R2, #30</textarea>
+        </div>
+
+        <div class="syntax-help">
+          <span><strong>산술/논리:</strong> <code>Add R2, R3, #100</code>, <code>Subtract R9, R2, #30</code>, <code>Or R7, R6, R5</code>, <code>LShiftL R3, R3, #1</code></span>
+          <span><strong>메모리:</strong> <code>Load R2, (R3)</code>, <code>Load R5, 16(R6)</code>, <code>Store R10, 24(R11)</code> (<code>[miss=2]</code> 추가 시 캐시 미스 지정)</span>
+          <span><strong>분기/루프:</strong> <code>Branch TARGET</code>, <code>Branch_if_[R5]=[R6] LOOP</code>, <code>TARGET: Or R1, R2, R3</code>, <code>NOP</code></span>
+        </div>
+      </div>
+
+      <!-- Right: Delay Reduction Checkboxes & Simulation Conditions -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">2. Delay 감소 기법 및 파이프라인 조건 설정</h2>
+            <p class="card-subtitle">체크박스를 선택/해제하여 하드웨어 기법에 따른 Delay 감소 효과를 비교해 보세요.</p>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" id="btn-check-all" class="preset-btn">모두 켜기</button>
+            <button type="button" id="btn-uncheck-all" class="preset-btn">모두 끄기</button>
+          </div>
+        </div>
+
+        <div class="options-list">
+          <!-- 1. Forwarding from RZ -->
+          <div class="option-item" id="item-fwd-rz">
+            <label class="option-label">
+              <input type="checkbox" id="chk-fwd-rz" />
+              <div class="option-content">
+                <div class="option-title-row">
+                  <span class="option-title">RZ에서 Forwarding (Interstage Buffer B3 → ALU)</span>
+                  <span class="option-tag tag-data">6.4.1 Data Hazard</span>
+                </div>
+                <p class="option-desc">직전 산술/논리 명령어의 C 단계 결과(RZ 레지스터)를 다음 명령어의 C 단계 ALU 입력으로 즉시 전달합니다 (Fig. 6.4, 6.5).</p>
+              </div>
+            </label>
+          </div>
+
+          <!-- 2. Forwarding from RY -->
+          <div class="option-item" id="item-fwd-ry">
+            <label class="option-label">
+              <input type="checkbox" id="chk-fwd-ry" />
+              <div class="option-content">
+                <div class="option-title-row">
+                  <span class="option-title">RY에서 Forwarding (Interstage Buffer B4 → ALU)</span>
+                  <span class="option-tag tag-data">6.4.1 &amp; 6.5 Data / Load-Use</span>
+                </div>
+                <p class="option-desc">M 단계를 마친 결과(산술 결과 또는 Load 메모리 데이터)가 담긴 RY 레지스터에서 C 단계 ALU 입력으로 전달합니다 (Fig. 6.8, 6.15).</p>
+              </div>
+            </label>
+          </div>
+
+          <!-- 3. Second Adder in Decode Stage -->
+          <div class="option-item" id="item-second-adder">
+            <label class="option-label">
+              <input type="checkbox" id="chk-second-adder" />
+              <div class="option-content">
+                <div class="option-title-row">
+                  <span class="option-title">Decode 단계에 Second Adder (&amp; Comparator) 추가</span>
+                  <span class="option-tag tag-branch">6.6.1 &amp; 6.6.2 Branch Delay</span>
+                </div>
+                <p class="option-desc">분기 목적지 주소와 분기 조건을 C 단계(Cycle 3) 대신 D 단계(Cycle 2)에서 조기 결정하여 기본 Branch Penalty를 2 사이클에서 1 사이클로 줄입니다 (Fig. 6.10).</p>
+              </div>
+            </label>
+          </div>
+
+          <!-- 4. Static Branch Prediction -->
+          <div class="option-item" id="item-static-pred">
+            <label class="option-label">
+              <input type="checkbox" id="chk-static-pred" />
+              <div class="option-content">
+                <div class="option-title-row">
+                  <span class="option-title">Static Branch Prediction (정적 분기 예측)</span>
+                  <span class="option-tag tag-branch">6.6.4 Static Prediction</span>
+                </div>
+                <p class="option-desc">실행 이력과 무관하게 고정된 규칙(오프셋 부호 또는 컴파일러 비트)으로 분기 결과를 예측합니다.</p>
+              </div>
+            </label>
+            <div class="sub-options" id="sub-static-pred">
+              <label>
+                정적 예측 방식:
+                <select id="sel-static-mode">
+                  <option value="backward_taken">역방향(루프)=Taken / 순방향=Taken 예측 (특성 기반)</option>
+                  <option value="not_taken">항상 Not-Taken 예측 (Assume Not-Taken)</option>
+                  <option value="always_taken">항상 Taken 예측 (Assume Taken)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- 5. Dynamic Branch Prediction -->
+          <div class="option-item" id="item-dynamic-pred">
+            <label class="option-label">
+              <input type="checkbox" id="chk-dynamic-pred" />
+              <div class="option-content">
+                <div class="option-title-row">
+                  <span class="option-title">Dynamic Branch Prediction (동적 분기 예측 - BTB &amp; 상태 머신)</span>
+                  <span class="option-tag tag-branch">6.6.4 Dynamic Prediction</span>
+                </div>
+                <p class="option-desc">Branch Target Buffer(BTB)와 상태 머신(Fig. 6.12)을 사용해 F 단계(Cycle 1)에서 목적지 주소와 분기 여부를 동적으로 예측합니다.</p>
+              </div>
+            </label>
+            <div class="sub-options" id="sub-dynamic-pred">
+              <label>
+                알고리즘:
+                <select id="sel-dyn-bits">
+                  <option value="2state">2-State (LNT / LT - Fig. 6.12a)</option>
+                  <option value="4state" selected>4-State (SNT / LNT / LT / ST - Fig. 6.12b)</option>
+                </select>
+              </label>
+              <label>
+                BTB 초기 상태:
+                <select id="sel-dyn-init">
+                  <option value="LT">LT (Likely Taken - 첫 분기부터 Taken 예측)</option>
+                  <option value="LNT" selected>LNT (Likely Not Taken - 교과서 기본값)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Additional Textbook Simulation Parameters (Memory Delay & Branch Outcome) -->
+          <div class="option-item" style="background:#f8fafc;">
+            <div class="option-title-row" style="margin-bottom:6px;">
+              <span class="option-title" style="font-size:0.84rem;">교과서 환경 세부 설정 (Memory Delay &amp; 분기 동작)</span>
+              <span class="option-tag tag-memory">6.5 Memory &amp; 6.6 Loop</span>
+            </div>
+            <div class="sub-options" style="border-top:none; margin-top:2px; padding-top:0;">
+              <label title="Fig. 6.7처럼 Load/Store 시 Data Cache Miss로 인해 M 단계가 추가로 소요하는 사이클 수">
+                Data Cache Miss 지연(M 단계):
+                <select id="sel-mem-miss-cycles">
+                  <option value="0" selected>0 cycle (Cache Hit - 1 사이클 완료)</option>
+                  <option value="2">+2 cycles (Fig. 6.7 예제 - 총 3 사이클 M)</option>
+                  <option value="3">+3 cycles (총 4 사이클 M)</option>
+                  <option value="5">+5 cycles (총 6 사이클 M)</option>
+                </select>
+              </label>
+              <label title="6.7절 Resource Limitations: 명령어와 데이터가 단일 캐시를 공유할 때 Load/Store의 M 단계 동안 F 단계가 1사이클 대기">
+                <input type="checkbox" id="chk-unified-cache" />
+                단일 캐시 충돌 (6.7절 Structural Hazard)
+              </label>
+              <label title="조건부 분기(Branch_if_...)의 기본 실제 결과">
+                조건부 분기 결과:
+                <select id="sel-branch-outcome">
+                  <option value="loop_taken" selected>루프 반복 후 탈출 (마지막만 Not-Taken)</option>
+                  <option value="always_taken">항상 Taken (분기 수행)</option>
+                  <option value="always_not_taken">항상 Not-Taken (분기 안 함)</option>
+                </select>
+              </label>
+              <label title="역방향 루프 분기 시 총 몇 회 반복할지 설정">
+                루프 반복 횟수:
+                <select id="sel-loop-iters">
+                  <option value="1">1회 (단일 실행)</option>
+                  <option value="2" selected>2회 반복 (루프 2회차에 탈출)</option>
+                  <option value="3">3회 반복 (루프 3회차에 탈출)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Middle Section: Pipeline Execution Diagram -->
+    <section class="card">
+      <div class="diagram-header-bar">
+        <div>
+          <h2 class="card-title">3. Cycle별 Pipeline Execution 다이어그램</h2>
+          <p class="card-subtitle">
+            <strong>💡 팁:</strong> 지연(Delay)이 발생한 넓은 박스나 파란색 폐기(Flush) 박스, 또는 포워딩 화살표에 <strong>마우스를 올리면 상세 설명 말풍선</strong>이 표시됩니다.
+          </p>
+        </div>
+
+        <div class="legend-group">
+          <span class="legend-item"><span class="legend-swatch swatch-normal"></span>정상 실행 (F/D/C/M/W)</span>
+          <span class="legend-item"><span class="legend-swatch swatch-data-stall"></span>Data Dependency 대기</span>
+          <span class="legend-item"><span class="legend-swatch swatch-mem-stall"></span>Memory Access 지연 (Cache Miss)</span>
+          <span class="legend-item"><span class="legend-swatch swatch-upstream-stall"></span>앞 명령어 대기로 인한 연쇄 지연</span>
+          <span class="legend-item"><span class="legend-swatch swatch-branch-flush"></span>Branch Penalty (폐기된 명령어 / 미사용 단계)</span>
+        </div>
+      </div>
+
+      <!-- Summary Metrics -->
+      <div class="metrics-bar" id="metrics-bar">
+        <div class="metric-box">
+          <span class="metric-label">총 실행 클럭 사이클 (Total Cycles)</span>
+          <span class="metric-value highlight-blue" id="metric-total-cycles">-</span>
+          <span class="metric-sub" id="metric-ideal-sub">이상적 실행 대비 -</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-label">총 Delay / Penalty 사이클</span>
+          <span class="metric-value highlight-red" id="metric-total-delays">-</span>
+          <span class="metric-sub" id="metric-delay-breakdown">Data: 0 · Memory: 0 · Branch: 0</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-label">기법 적용으로 줄어든 Delay</span>
+          <span class="metric-value highlight-green" id="metric-saved-cycles">-</span>
+          <span class="metric-sub" id="metric-saved-sub">기본 파이프라인(기법 미적용) 대비</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-label">평균 CPI (Cycles Per Instruction)</span>
+          <span class="metric-value" id="metric-cpi">-</span>
+          <span class="metric-sub" id="metric-instr-count">완료된 유효 명령어 기준</span>
+        </div>
+      </div>
+
+      <!-- Textbook-style Pipeline Diagram Scroll Area -->
+      <div class="pipeline-scroll-container" id="pipeline-scroll-container">
+        <div class="pipeline-canvas-wrapper" id="pipeline-canvas-wrapper">
+          <svg class="forwarding-svg-overlay" id="forwarding-svg"></svg>
+          <div id="pipeline-diagram-root"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom Section: Detailed Delay Breakdown & Branch Predictor State -->
+    <section class="bottom-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">4. 발생한 Delay &amp; Forwarding 상세 분석 로그</h2>
+            <p class="card-subtitle">각 사이클에서 발생한 Hazard 원인과 하드웨어 동작(B1~B4 버퍼, RZ/RY 레지스터) 요약입니다.</p>
+          </div>
+        </div>
+        <div class="hazard-log-list" id="hazard-log-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">5. Branch Prediction 상태 머신 &amp; BTB 기록</h2>
+            <p class="card-subtitle">교과서 Figure 6.12 (2-State / 4-State) 동적 분기 예측기 상태 전이 과정입니다.</p>
+          </div>
+        </div>
+        <div id="branch-predictor-panel"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Floating Speech-Bubble Tooltip (말풍선) -->
+  <div id="delay-tooltip" class="delay-tooltip" role="tooltip" aria-hidden="true"></div>
+
+  <script src="app.js"></script>
 </body>
 </html>
